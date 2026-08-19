@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+<title>Carnet de ménage — Rapport de contrôle</title>
+
+<!-- React -->
+
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<!-- jsPDF pour la génération PDF réelle côté navigateur -->
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #F5F2EA; font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif; }
+  #root { min-height: 100vh; }
+</style>
+
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef } = React;
+
+/* ---------------------------------------------------------------
+   DONNÉES — Inventaire
+--------------------------------------------------------------- */
+
+const INVENTAIRE = [
+  {
+    id: "plan-travail",
+    titre: "Plan de travail — coin machine à café",
+    items: [
+      { id: "machine-cafe", label: "Machine à café (capsules) en état de marche" },
+      { id: "reservoir-eau", label: "Réservoir d'eau propre et rempli" },
+      { id: "essuie-tout", label: "Support essuie-tout avec rouleau" },
+      { id: "pot-ustensiles", label: "Pot en bois avec 4 ustensiles en bois" },
+      { id: "boite-cafe", label: "Boîte à café noire fermée" },
+      { id: "mignardises", label: "Mignardises / madeleines emballées + savon en accueil" },
+    ],
+  },
+  {
+    id: "placard-haut-1",
+    titre: "Placard haut — vaisselle & verres",
+    items: [
+      { id: "saladier-blanc", label: "Grand saladier blanc" },
+      { id: "petit-saladier", label: "Petit saladier blanc côtelé" },
+      { id: "vases-couleur", label: "3 petits vases/gobelets colorés (rose, bleu, vert)" },
+      { id: "mugs", label: "2 mugs motif géométrique noir/blanc" },
+      { id: "verres-pied", label: "3 verres à pied" },
+      { id: "pot-gris", label: "Petit pot gris" },
+    ],
+  },
+  {
+    id: "placard-haut-2",
+    titre: "Placard haut — électroménager & assaisonnements",
+    items: [
+      { id: "bouilloire", label: "Bouilloire noire" },
+      { id: "appareil-blanc", label: "Petit appareil blanc (grille-pain/mixeur)" },
+      { id: "carafe", label: "Carafe en verre transparente" },
+      { id: "assiettes", label: "Pile d'assiettes (6 assiettes plates + 2 bols gris/blanc)" },
+      { id: "gros-sel", label: "Boîte de gros sel La Baleine" },
+      { id: "huiles", label: "2 bouteilles d'huile d'olive + 1 vinaigre" },
+      { id: "moulins", label: "Moulins à sel/poivre" },
+    ],
+  },
+  {
+    id: "tiroir-couverts",
+    titre: "Tiroir — couverts & ustensiles",
+    items: [
+      { id: "range-couverts", label: "Range-couverts en bambou complet" },
+      { id: "tire-bouchon", label: "Tire-bouchon / décapsuleur" },
+      { id: "film-alu", label: "Rouleau de film étirable/alu" },
+      { id: "louche", label: "Louche inox" },
+      { id: "fouet", label: "Fouet" },
+      { id: "spatule", label: "Spatule silicone" },
+      { id: "ciseaux", label: "Ciseaux de cuisine" },
+      { id: "couteaux-chef", label: "Couteau(x) de chef" },
+      { id: "eplucheur", label: "Éplucheur" },
+    ],
+  },
+  {
+    id: "tiroir-plats",
+    titre: "Tiroir — plats & récipients",
+    items: [
+      { id: "plat-verre", label: "Plat rectangulaire en verre" },
+      { id: "passoire", label: "Passoire inox" },
+      { id: "planche", label: "Planche à découper en bambou" },
+    ],
+  },
+  {
+    id: "tiroir-poeles",
+    titre: "Tiroir — poêles & casseroles",
+    items: [
+      { id: "petite-poele", label: "Petite poêle (blinis) noire" },
+      { id: "assiette-verre", label: "Assiette/plat en verre" },
+      { id: "grande-poele", label: "Grande poêle antiadhésive" },
+      { id: "casserole", label: "Casserole/sauteuse avec manche noir" },
+    ],
+  },
+];
+
+const TACHES_DEFAUT = [
+  { id: "t1", label: "Sols aspirés et lavés (toutes les pièces)", done: false },
+  { id: "t2", label: "Salle de bain nettoyée (douche, WC, lavabo)", done: false },
+  { id: "t3", label: "Cuisine nettoyée (plan de travail, plaques, évier)", done: false },
+  { id: "t4", label: "Vaisselle rangée", done: false },
+  { id: "t5", label: "Poubelles vidées", done: false },
+  { id: "t6", label: "Draps changés / lits faits", done: false },
+  { id: "t7", label: "Serviettes changées", done: false },
+  { id: "t8", label: "Vitres et miroirs nettoyés", done: false },
+  { id: "t9", label: "Poussière (meubles, étagères)", done: false },
+  { id: "t10", label: "Linge de maison en cours de lavage lancé", done: false },
+];
+
+const EMAIL_DEST = "Maj.immo137630@gmail.com";
+const WHATSAPP_NUMERO = "33616467018";
+const STORAGE_KEY = "menage-webapp-v1";
+
+/* ---------------------------------------------------------------
+   STOCKAGE LOCAL (localStorage — fonctionne car app hébergée, hors artifact)
+--------------------------------------------------------------- */
+
+function useLocalStorage(key, initial) {
+  const [state, setState] = useState(() => {
+    try {
+      const saved = localStorage.getItem(key);
+      return saved ? JSON.parse(saved) : initial;
+    } catch (e) {
+      return initial;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(key, JSON.stringify(state));
+    } catch (e) {}
+  }, [key, state]);
+  return [state, setState];
+}
+
+function defaultInventaireState() {
+  const s = {};
+  INVENTAIRE.forEach((sec) => {
+    s[sec.id] = {};
+    sec.items.forEach((it) => {
+      s[sec.id][it.id] = { status: null, comment: "" };
+    });
+  });
+  return s;
+}
+
+function todayLabel() {
+  const d = new Date();
+  return d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+
+/* ---------------------------------------------------------------
+   GÉNÉRATION PDF RÉELLE (jsPDF)
+--------------------------------------------------------------- */
+
+function genererPDF({ inv, taches, photos, message, nomAgent, doneInv, totalInv, doneTaches, totalTaches, problemesInv }) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit: "mm", format: "a4" });
+  const pageW = 210, marginX = 16;
+  let y = 16;
+
+  const DARK = [46, 51, 47];
+  const GREEN = [91, 116, 97];
+  const GREEN_TEXT = [46, 107, 74];
+  const RED = [180, 85, 63];
+  const GREY = [107, 101, 88];
+  const MUTED = [138, 133, 120];
+  const BG_LIGHT = [243, 241, 234];
+  const BORDER = [233, 229, 218];
+
+  function checkPageBreak(needed) {
+    if (y + needed > 285) {
+      doc.addPage();
+      y = 16;
+    }
+  }
+
+  // --- EN-TÊTE ---
+  doc.setFillColor(...DARK);
+  doc.roundedRect(marginX, y, pageW - marginX * 2, 26, 3, 3, "F");
+  doc.setTextColor(168, 176, 163);
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "bold");
+  doc.text("CARNET DE MÉNAGE", marginX + 6, y + 7);
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(15);
+  doc.text("Rapport de contrôle du logement", marginX + 6, y + 14);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(168, 176, 163);
+  doc.text(todayLabel(), marginX + 6, y + 19.5);
+  if (nomAgent && nomAgent.trim()) {
+    doc.setTextColor(220, 224, 216);
+    doc.text(`Réalisé par : ${nomAgent.trim()}`, marginX + 6, y + 23.5);
+  }
+  y += 32;
+
+  // --- RÉSUMÉ ---
+  const boxW = (pageW - marginX * 2 - 8) / 3;
+  const summary = [
+    [`${doneInv}/${totalInv}`, "Éléments vérifiés", GREEN],
+    [`${problemesInv.length}`, "Problème(s) signalé(s)", problemesInv.length > 0 ? RED : GREEN],
+    [`${doneTaches}/${totalTaches}`, "Tâches terminées", GREEN],
+  ];
+  summary.forEach((s, i) => {
+    const x = marginX + i * (boxW + 4);
+    doc.setDrawColor(...BORDER);
+    doc.roundedRect(x, y, boxW, 16, 2, 2, "S");
+    doc.setTextColor(...s[2]);
+    doc.setFontSize(14);
+    doc.setFont("helvetica", "bold");
+    doc.text(s[0], x + 4, y + 7);
+    doc.setTextColor(...MUTED);
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "normal");
+    doc.text(s[1], x + 4, y + 12);
+  });
+  y += 24;
+
+  // --- INVENTAIRE ---
+  doc.setTextColor(...DARK);
+  doc.setFontSize(13);
+  doc.setFont("helvetica", "bold");
+  doc.text("Inventaire détaillé", marginX, y);
+  y += 2;
+  doc.setDrawColor(...GREEN);
+  doc.setLineWidth(0.8);
+  doc.line(marginX, y, pageW - marginX, y);
+  y += 6;
+
+  INVENTAIRE.forEach((section) => {
+    checkPageBreak(20);
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...DARK);
+    doc.text(section.titre, marginX, y);
+    y += 5;
+
+    // en-tête tableau
+    doc.setFillColor(...BG_LIGHT);
+    doc.rect(marginX, y - 3.5, pageW - marginX * 2, 5, "F");
+    doc.setFontSize(7);
+    doc.setTextColor(...GREY);
+    doc.text("Élément", marginX + 1.5, y);
+    doc.text("Statut", marginX + 82, y);
+    doc.text("Commentaire", marginX + 112, y);
+    y += 4;
+
+    section.items.forEach((item) => {
+      checkPageBreak(8);
+      const st = inv[section.id]?.[item.id] || {};
+      const statusLabel = st.status === "ok" ? "Conforme" : st.status === "probleme" ? "Problème" : "Non vérifié";
+      const statusColor = st.status === "ok" ? GREEN_TEXT : st.status === "probleme" ? RED : MUTED;
+
+      doc.setFontSize(8.3);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(...DARK);
+      const labelLines = doc.splitTextToSize(item.label, 78);
+      doc.text(labelLines, marginX + 1.5, y);
+
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(...statusColor);
+      doc.text(statusLabel, marginX + 82, y);
+
+      if (st.comment) {
+        doc.setFont("helvetica", "italic");
+        doc.setFontSize(7.8);
+        doc.setTextColor(...GREY);
+        const commentLines = doc.splitTextToSize(st.comment, 55);
+        doc.text(commentLines, marginX + 112, y);
+        y += Math.max(labelLines.length, commentLines.length) * 4;
+      } else {
+        y += labelLines.length * 4;
+      }
+      doc.setDrawColor(...BORDER);
+      doc.setLineWidth(0.2);
+      doc.line(marginX, y - 1, pageW - marginX, y - 1);
+      y += 1.5;
+    });
+    y += 4;
+  });
+
+  // --- TÂCHES ---
+  checkPageBreak(20);
+  y += 4;
+  doc.setFontSize(13);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...DARK);
+  doc.text("Tâches de ménage", marginX, y);
+  y += 2;
+  doc.setDrawColor(...GREEN);
+  doc.line(marginX, y, pageW - marginX, y);
+  y += 7;
+
+  taches.forEach((t) => {
+    checkPageBreak(6);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    if (t.done) {
+      doc.setTextColor(...GREEN);
+      doc.text("[FAIT]", marginX, y);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(...MUTED);
+      doc.text(t.label, marginX + 14, y);
+    } else {
+      doc.setTextColor(...RED);
+      doc.text("[A FAIRE]", marginX, y);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(...DARK);
+      doc.text(t.label, marginX + 18, y);
+    }
+    y += 5.5;
+  });
+
+  // --- MESSAGE ---
+  checkPageBreak(20);
+  y += 4;
+  doc.setFontSize(13);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...DARK);
+  doc.text("Message complémentaire", marginX, y);
+  y += 2;
+  doc.setDrawColor(...GREEN);
+  doc.line(marginX, y, pageW - marginX, y);
+  y += 7;
+
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...DARK);
+  if (message && message.trim()) {
+    const msgLines = doc.splitTextToSize(message.trim(), pageW - marginX * 2 - 8);
+    doc.setFillColor(250, 248, 243);
+    doc.setDrawColor(...BORDER);
+    doc.roundedRect(marginX, y - 4, pageW - marginX * 2, msgLines.length * 4.5 + 6, 2, 2, "FD");
+    doc.text(msgLines, marginX + 4, y);
+    y += msgLines.length * 4.5 + 8;
+  } else {
+    doc.setTextColor(...MUTED);
+    doc.text("Aucun message.", marginX, y);
+    y += 8;
+  }
+
+  // --- PHOTOS ---
+  checkPageBreak(20);
+  y += 4;
+  doc.setFontSize(13);
+  doc.setFont("helvetica", "bold");
+  doc.setTextColor(...DARK);
+  doc.text(`Photos — état des lieux (${photos.length})`, marginX, y);
+  y += 2;
+  doc.setDrawColor(...GREEN);
+  doc.line(marginX, y, pageW - marginX, y);
+  y += 8;
+
+  if (photos.length > 0) {
+    const imgSize = 42, gap = 4;
+    let x = marginX;
+    photos.forEach((p, i) => {
+      if (x + imgSize > pageW - marginX) {
+        x = marginX;
+        y += imgSize + 8;
+      }
+      checkPageBreak(imgSize + 10);
+      try {
+        doc.addImage(p, "JPEG", x, y, imgSize, imgSize);
+      } catch (e) {
+        try { doc.addImage(p, "PNG", x, y, imgSize, imgSize); } catch (e2) {}
+      }
+      doc.setFontSize(7);
+      doc.setTextColor(...MUTED);
+      doc.text(`Photo ${i + 1}`, x + imgSize / 2, y + imgSize + 4, { align: "center" });
+      x += imgSize + gap;
+    });
+    y += imgSize + 10;
+  } else {
+    doc.setFontSize(9);
+    doc.setTextColor(...MUTED);
+    doc.text("Aucune photo ajoutée.", marginX, y);
+    y += 8;
+  }
+
+  // --- PIED DE PAGE sur toutes les pages ---
+  const pageCount = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFontSize(7);
+    doc.setTextColor(...MUTED);
+    doc.text(
+      `Rapport généré le ${new Date().toLocaleString("fr-FR")} — page ${i}/${pageCount}`,
+      pageW / 2, 292, { align: "center" }
+    );
+  }
+
+  return doc;
+}
+
+/* ---------------------------------------------------------------
+   COMPOSANTS UI
+--------------------------------------------------------------- */
+
+function ProgressRing({ done, total }) {
+  const pct = total === 0 ? 0 : Math.round((done / total) * 100);
+  const r = 26, c = 2 * Math.PI * r, offset = c - (pct / 100) * c;
+  return (
+    <div style={{ position: "relative", width: 64, height: 64, flexShrink: 0 }}>
+      <svg width="64" height="64" viewBox="0 0 64 64" style={{ transform: "rotate(-90deg)" }}>
+        <circle cx="32" cy="32" r={r} stroke="#E4E0D6" strokeWidth="6" fill="none" />
+        <circle cx="32" cy="32" r={r} stroke="#5B7461" strokeWidth="6" fill="none"
+          strokeDasharray={c} strokeDashoffset={offset} strokeLinecap="round"
+          style={{ transition: "stroke-dashoffset 0.4s ease" }} />
+      </svg>
+      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600, fontSize: 13, color: "#2E332F" }}>
+        {pct}%
+      </div>
+    </div>
+  );
+}
+
+function ItemRow({ item, status, onSetStatus, comment, onSetComment }) {
+  return (
+    <div style={{ borderBottom: "1px solid #E9E5DA" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 4px" }}>
+        <span style={{ flex: 1, fontSize: 14.5, lineHeight: 1.3, color: "#2E332F" }}>{item.label}</span>
+        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+          <button onClick={() => onSetStatus(status === "ok" ? null : "ok")}
+            style={{ width: 36, height: 36, borderRadius: "50%", border: "none", display: "flex", alignItems: "center", justifyContent: "center",
+              background: status === "ok" ? "#5B7461" : "#F3F1EA", color: status === "ok" ? "#fff" : "#8A8578", fontSize: 16, cursor: "pointer" }}>
+            ✓
+          </button>
+          <button onClick={() => onSetStatus(status === "probleme" ? null : "probleme")}
+            style={{ width: 36, height: 36, borderRadius: "50%", border: "none", display: "flex", alignItems: "center", justifyContent: "center",
+              background: status === "probleme" ? "#B4553F" : "#F3F1EA", color: status === "probleme" ? "#fff" : "#8A8578", fontSize: 16, cursor: "pointer" }}>
+            ✕
+          </button>
+        </div>
+      </div>
+      {status === "probleme" && (
+        <div style={{ paddingBottom: 12, padding: "0 4px 12px" }}>
+          <textarea value={comment || ""} onChange={(e) => onSetComment(e.target.value)}
+            placeholder="Précisez le problème (cassé, manquant, sale...)" rows={2}
+            style={{ width: "100%", fontSize: 13.5, borderRadius: 8, padding: "8px 12px", outline: "none", resize: "none",
+              background: "#FBF6EC", border: "1px solid #E8D9BD", color: "#2E332F", fontFamily: "inherit" }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Section({ section, sectionState, onSetStatus, onSetComment, defaultOpen }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const items = section.items;
+  const done = items.filter((it) => sectionState[it.id]?.status === "ok").length;
+  const problems = items.filter((it) => sectionState[it.id]?.status === "probleme").length;
+
+  return (
+    <div style={{ borderRadius: 16, overflow: "hidden", marginBottom: 12, background: "#fff", border: "1px solid #E9E5DA" }}>
+      <button onClick={() => setOpen((o) => !o)}
+        style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", textAlign: "left", background: "none", border: "none", cursor: "pointer" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 600, fontSize: 15, color: "#2E332F", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{section.titre}</div>
+          <div style={{ fontSize: 12.5, marginTop: 2, display: "flex", alignItems: "center", gap: 8, color: "#8A8578" }}>
+            <span>{done}/{items.length} vérifiés</span>
+            {problems > 0 && <span style={{ color: "#B4553F" }}>⚠ {problems}</span>}
+          </div>
+        </div>
+        <span style={{ color: "#8A8578", transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.25s ease", fontSize: 14 }}>▾</span>
+      </button>
+      {open && (
+        <div style={{ padding: "0 16px 4px", borderTop: "1px solid #E9E5DA" }}>
+          {items.map((item) => (
+            <ItemRow key={item.id} item={item}
+              status={sectionState[item.id]?.status || null}
+              comment={sectionState[item.id]?.comment || ""}
+              onSetStatus={(s) => onSetStatus(section.id, item.id, s)}
+              onSetComment={(c) => onSetComment(section.id, item.id, c)} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PhotoGrid({ photos, onAdd, onRemove }) {
+  const inputRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+
+  const handleFiles = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setBusy(true);
+    for (const f of files) {
+      try {
+        const dataUrl = await fileToDataUrl(f);
+        onAdd(dataUrl);
+      } catch (err) { console.error(err); }
+    }
+    setBusy(false);
+    e.target.value = "";
+  };
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
+      {photos.map((p, i) => (
+        <div key={i} style={{ position: "relative", aspectRatio: "1", borderRadius: 12, overflow: "hidden", border: "1px solid #E9E5DA" }}>
+          <img src={p} alt={`État des lieux ${i + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          <button onClick={() => onRemove(i)}
+            style={{ position: "absolute", top: 4, right: 4, width: 24, height: 24, borderRadius: "50%", border: "none",
+              background: "rgba(46,51,47,0.75)", color: "#fff", cursor: "pointer", fontSize: 12 }}>✕</button>
+        </div>
+      ))}
+      <button onClick={() => inputRef.current?.click()} disabled={busy}
+        style={{ aspectRatio: "1", borderRadius: 12, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4,
+          fontSize: 11, color: "#8A8578", background: "#FAF8F3", border: "1.5px dashed #C9C2AF", cursor: "pointer" }}>
+        <span style={{ fontSize: 18 }}>{busy ? "⏳" : "📷"}</span>
+        <span>Ajouter</span>
+      </button>
+      <input ref={inputRef} type="file" accept="image/*" capture="environment" multiple onChange={handleFiles} style={{ display: "none" }} />
+    </div>
+  );
+}
+
+function TacheRow({ tache, onSetDone, onRemove }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0" }}>
+      <button onClick={() => onSetDone(!tache.done)}
+        style={{ width: 24, height: 24, borderRadius: 6, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+          background: tache.done ? "#5B7461" : "#fff", border: tache.done ? "none" : "1.5px solid #C9C2AF" }}>
+        {tache.done && <span style={{ color: "#fff", fontSize: 13 }}>✓</span>}
+      </button>
+      <span style={{ flex: 1, fontSize: 14, color: tache.done ? "#8A8578" : "#2E332F", textDecoration: tache.done ? "line-through" : "none" }}>{tache.label}</span>
+      <button onClick={onRemove} style={{ color: "#C9C2AF", background: "none", border: "none", cursor: "pointer", fontSize: 15 }}>✕</button>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------
+   APP PRINCIPALE
+--------------------------------------------------------------- */
+
+function App() {
+  const [inv, setInv] = useLocalStorage(STORAGE_KEY + "-inventaire", defaultInventaireState());
+  const [taches, setTaches] = useLocalStorage(STORAGE_KEY + "-taches", TACHES_DEFAUT);
+  const [photos, setPhotos] = useLocalStorage(STORAGE_KEY + "-photos", []);
+  const [message, setMessage] = useLocalStorage(STORAGE_KEY + "-message", "");
+  const [nomAgent, setNomAgent] = useLocalStorage(STORAGE_KEY + "-nom", "");
+  const [newTache, setNewTache] = useState("");
+  const [tab, setTab] = useState("inventaire");
+  const [generating, setGenerating] = useState(false);
+
+  const allItems = INVENTAIRE.flatMap((sec) => sec.items.map((it) => ({ secId: sec.id, itId: it.id })));
+  const totalInv = allItems.length;
+  const doneInv = allItems.filter((a) => inv[a.secId]?.[a.itId]?.status === "ok").length;
+  const problemesInv = allItems
+    .filter((a) => inv[a.secId]?.[a.itId]?.status === "probleme")
+    .map((a) => {
+      const sec = INVENTAIRE.find((s) => s.id === a.secId);
+      const it = sec.items.find((i) => i.id === a.itId);
+      return { titreSection: sec.titre, label: it.label, comment: inv[a.secId][a.itId].comment };
+    });
+  const totalTaches = taches.length;
+  const doneTaches = taches.filter((t) => t.done).length;
+
+  const setStatus = (secId, itId, status) => {
+    setInv({ ...inv, [secId]: { ...inv[secId], [itId]: { ...inv[secId][itId], status } } });
+  };
+  const setComment = (secId, itId, comment) => {
+    setInv({ ...inv, [secId]: { ...inv[secId], [itId]: { ...inv[secId][itId], comment } } });
+  };
+  const addTache = () => {
+    if (!newTache.trim()) return;
+    setTaches([...taches, { id: "t" + Date.now(), label: newTache.trim(), done: false }]);
+    setNewTache("");
+  };
+  const setTacheDone = (id, done) => setTaches(taches.map((t) => (t.id === id ? { ...t, done } : t)));
+  const removeTache = (id) => setTaches(taches.filter((t) => t.id !== id));
+  const addPhoto = (dataUrl) => setPhotos([...photos, dataUrl]);
+  const removePhoto = (i) => setPhotos(photos.filter((_, idx) => idx !== i));
+
+  const handleGeneratePDF = async () => {
+    setGenerating(true);
+    try {
+      const doc = genererPDF({ inv, taches, photos, message, nomAgent, doneInv, totalInv, doneTaches, totalTaches, problemesInv });
+      const fileName = `rapport-menage-${new Date().toISOString().slice(0, 10)}.pdf`;
+      doc.save(fileName);
+    } catch (e) {
+      alert("Erreur lors de la génération du PDF : " + e.message);
+      console.error(e);
+    }
+    setGenerating(false);
+  };
+
+  const handleSendEmail = () => {
+    const subject = encodeURIComponent(`Rapport de ménage - ${new Date().toLocaleDateString("fr-FR")}${problemesInv.length > 0 ? " - probleme(s) signale(s)" : ""}`);
+    const body = encodeURIComponent(
+      `Rapport de ménage du ${todayLabel()}.\n\n` +
+      `Éléments vérifiés : ${doneInv}/${totalInv}\n` +
+      `Problèmes signalés : ${problemesInv.length}\n` +
+      `Tâches terminées : ${doneTaches}/${totalTaches}\n\n` +
+      `Le PDF détaillé est en pièce jointe (pensez à le joindre après l'avoir téléchargé).`
+    );
+    window.location.href = `mailto:${EMAIL_DEST}?subject=${subject}&body=${body}`;
+  };
+
+  const handleSendWhatsApp = () => {
+    const text = encodeURIComponent(
+      `Rapport de ménage - ${todayLabel()}\n` +
+      `${doneInv}/${totalInv} éléments vérifiés, ${problemesInv.length} problème(s), ${doneTaches}/${totalTaches} tâches faites.\n` +
+      `PDF détaillé à joindre séparément.`
+    );
+    window.open(`https://wa.me/${WHATSAPP_NUMERO}?text=${text}`, "_blank");
+  };
+
+  const resetAll = () => {
+    if (!window.confirm("Réinitialiser tout le formulaire pour un nouveau ménage ?")) return;
+    setInv(defaultInventaireState());
+    setTaches(TACHES_DEFAUT);
+    setPhotos([]);
+    setMessage("");
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", paddingBottom: 140, background: "#F5F2EA" }}>
+      <div style={{ background: "#2E332F", padding: "24px 20px 20px", borderRadius: "0 0 28px 28px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 44, height: 44, borderRadius: 12, background: "#5B7461", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 22 }}>📋</div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1, color: "#A8B0A3" }}>Carnet de ménage</div>
+            <div style={{ color: "#fff", fontWeight: 600, fontSize: 17 }}>Contrôle du logement</div>
+          </div>
+          <ProgressRing done={doneInv + doneTaches} total={totalInv + totalTaches} />
+        </div>
+        <div style={{ fontSize: 12.5, marginTop: 12, textTransform: "capitalize", color: "#A8B0A3" }}>{todayLabel()}</div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, padding: "0 20px", marginTop: 16 }}>
+        {[
+          { id: "inventaire", label: "Inventaire" },
+          { id: "taches", label: "Tâches" },
+          { id: "photos", label: "Photos" },
+          { id: "message", label: "Message" },
+        ].map((t) => (
+          <button key={t.id} onClick={() => setTab(t.id)}
+            style={{ flex: 1, padding: "8px 0", borderRadius: 999, fontSize: 12.5, fontWeight: 500, cursor: "pointer",
+              background: tab === t.id ? "#5B7461" : "#fff", color: tab === t.id ? "#fff" : "#6B6558",
+              border: tab === t.id ? "none" : "1px solid #E9E5DA" }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ padding: "0 20px", marginTop: 16 }}>
+        {tab === "inventaire" && (
+          <>
+            <p style={{ fontSize: 12.5, marginBottom: 12, lineHeight: 1.5, color: "#8A8578" }}>
+              Vérifiez chaque élément. Cochez <b>✓</b> si conforme, ou <b>✕</b> si problème — un commentaire s'ouvrira.
+            </p>
+            {INVENTAIRE.map((section, idx) => (
+              <Section key={section.id} section={section} sectionState={inv[section.id]}
+                onSetStatus={setStatus} onSetComment={setComment} defaultOpen={idx === 0} />
+            ))}
+          </>
+        )}
+
+        {tab === "taches" && (
+          <div style={{ borderRadius: 16, padding: 16, background: "#fff", border: "1px solid #E9E5DA" }}>
+            <div style={{ fontSize: 12.5, marginBottom: 8, color: "#8A8578" }}>{doneTaches}/{totalTaches} tâches terminées</div>
+            <div>
+              {taches.map((t) => (
+                <TacheRow key={t.id} tache={t} onSetDone={(d) => setTacheDone(t.id, d)} onRemove={() => removeTache(t.id)} />
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <input value={newTache} onChange={(e) => setNewTache(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addTache()} placeholder="Ajouter une tâche..."
+                style={{ flex: 1, fontSize: 13.5, borderRadius: 8, padding: "8px 12px", outline: "none", background: "#FAF8F3", border: "1px solid #E9E5DA", color: "#2E332F" }} />
+              <button onClick={addTache} style={{ padding: "0 16px", borderRadius: 8, fontSize: 13, fontWeight: 500, background: "#5B7461", color: "#fff", border: "none", cursor: "pointer" }}>
+                Ajouter
+              </button>
+            </div>
+          </div>
+        )}
+
+        {tab === "photos" && (
+          <div style={{ borderRadius: 16, padding: 16, background: "#fff", border: "1px solid #E9E5DA" }}>
+            <p style={{ fontSize: 12.5, marginBottom: 12, lineHeight: 1.5, color: "#8A8578" }}>
+              Prenez des photos pour documenter l'état des lieux — elles seront intégrées au PDF.
+            </p>
+            <PhotoGrid photos={photos} onAdd={addPhoto} onRemove={removePhoto} />
+          </div>
+        )}
+
+        {tab === "message" && (
+          <div style={{ borderRadius: 16, padding: 16, background: "#fff", border: "1px solid #E9E5DA" }}>
+            <label style={{ fontSize: 12.5, fontWeight: 500, marginBottom: 8, display: "block", color: "#2E332F" }}>Votre nom</label>
+            <input value={nomAgent} onChange={(e) => setNomAgent(e.target.value)} placeholder="Prénom Nom"
+              style={{ width: "100%", fontSize: 13.5, borderRadius: 8, padding: "8px 12px", outline: "none", marginBottom: 16, background: "#FAF8F3", border: "1px solid #E9E5DA", color: "#2E332F" }} />
+            <label style={{ fontSize: 12.5, fontWeight: 500, marginBottom: 8, display: "block", color: "#2E332F" }}>Message complémentaire</label>
+            <textarea value={message} onChange={(e) => setMessage(e.target.value)} rows={6}
+              placeholder="Remarques, informations utiles..."
+              style={{ width: "100%", fontSize: 13.5, borderRadius: 8, padding: "10px 12px", outline: "none", resize: "none", background: "#FAF8F3", border: "1px solid #E9E5DA", color: "#2E332F", fontFamily: "inherit" }} />
+          </div>
+        )}
+
+        {problemesInv.length > 0 && tab !== "inventaire" && (
+          <div style={{ marginTop: 12, borderRadius: 12, padding: "12px 14px", display: "flex", gap: 8, background: "#FBEEEA", border: "1px solid #EBC9BB" }}>
+            <span style={{ color: "#B4553F" }}>⚠</span>
+            <span style={{ fontSize: 12.5, color: "#8A4433" }}>{problemesInv.length} problème(s) signalé(s) — inclus dans le PDF.</span>
+          </div>
+        )}
+
+        <button onClick={resetAll} style={{ width: "100%", textAlign: "center", fontSize: 12, marginTop: 20, padding: 8, background: "none", border: "none", color: "#B0A896", cursor: "pointer" }}>
+          Réinitialiser pour un nouveau ménage
+        </button>
+      </div>
+
+      <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, padding: "12px 20px 20px", background: "linear-gradient(to top, #F5F2EA 70%, rgba(245,242,234,0))" }}>
+        <button onClick={handleGeneratePDF} disabled={generating}
+          style={{ width: "100%", padding: "14px 0", borderRadius: 16, fontWeight: 600, fontSize: 14, marginBottom: 8, border: "none", cursor: "pointer",
+            background: "#2E332F", color: "#fff", boxShadow: "0 4px 12px rgba(0,0,0,0.15)" }}>
+          {generating ? "Génération..." : "⬇️ Télécharger le rapport en PDF"}
+        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={handleSendEmail}
+            style={{ flex: 1, padding: "10px 0", borderRadius: 16, fontWeight: 600, fontSize: 13, border: "1.5px solid #D8D3C4", cursor: "pointer", background: "#fff", color: "#2E332F" }}>
+            ✉️ E-mail
+          </button>
+          <button onClick={handleSendWhatsApp}
+            style={{ flex: 1, padding: "10px 0", borderRadius: 16, fontWeight: 600, fontSize: 13, border: "1.5px solid #D8D3C4", cursor: "pointer", background: "#fff", color: "#25D366" }}>
+            💬 WhatsApp
+          </button>
+        </div>
+        <div style={{ textAlign: "center", fontSize: 10.5, marginTop: 8, lineHeight: 1.5, color: "#B0A896" }}>
+          1. Téléchargez le PDF → 2. Joignez-le au mail ou à WhatsApp ci-dessous.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+
+</body>
+</html>
