@@ -1,3 +1,6 @@
+
+
+Index · HTML
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -265,7 +268,7 @@ function genererPDF({ inv, taches, photos, message, nomAgent, doneInv, totalInv,
  
     section.items.forEach((item) => {
       checkPageBreak(8);
-      const st = inv[section.id]?.[item.id] || {};
+      const st = (inv[section.id] && inv[section.id][item.id]) || {};
       const statusLabel = st.status === "ok" ? "Conforme" : st.status === "probleme" ? "Problème" : "Non vérifié";
       const statusColor = st.status === "ok" ? GREEN_TEXT : st.status === "probleme" ? RED : MUTED;
  
@@ -466,8 +469,8 @@ function ItemRow({ item, status, onSetStatus, comment, onSetComment }) {
 function Section({ section, sectionState, onSetStatus, onSetComment, defaultOpen }) {
   const [open, setOpen] = useState(defaultOpen);
   const items = section.items;
-  const done = items.filter((it) => sectionState[it.id]?.status === "ok").length;
-  const problems = items.filter((it) => sectionState[it.id]?.status === "probleme").length;
+  const done = items.filter((it) => sectionState[it.id] && sectionState[it.id].status === "ok").length;
+  const problems = items.filter((it) => sectionState[it.id] && sectionState[it.id].status === "probleme").length;
  
   return (
     <div style={{ borderRadius: 16, overflow: "hidden", marginBottom: 12, background: "#fff", border: "1px solid #E9E5DA" }}>
@@ -486,8 +489,8 @@ function Section({ section, sectionState, onSetStatus, onSetComment, defaultOpen
         <div style={{ padding: "0 16px 4px", borderTop: "1px solid #E9E5DA" }}>
           {items.map((item) => (
             <ItemRow key={item.id} item={item}
-              status={sectionState[item.id]?.status || null}
-              comment={sectionState[item.id]?.comment || ""}
+              status={(sectionState[item.id] && sectionState[item.id].status) || null}
+              comment={(sectionState[item.id] && sectionState[item.id].comment) || ""}
               onSetStatus={(s) => onSetStatus(section.id, item.id, s)}
               onSetComment={(c) => onSetComment(section.id, item.id, c)} />
           ))}
@@ -525,7 +528,7 @@ function PhotoGrid({ photos, onAdd, onRemove }) {
               background: "rgba(46,51,47,0.75)", color: "#fff", cursor: "pointer", fontSize: 12 }}>✕</button>
         </div>
       ))}
-      <button onClick={() => inputRef.current?.click()} disabled={busy}
+      <button onClick={() => { if (inputRef.current) inputRef.current.click(); }} disabled={busy}
         style={{ aspectRatio: "1", borderRadius: 12, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4,
           fontSize: 11, color: "#8A8578", background: "#FAF8F3", border: "1.5px dashed #C9C2AF", cursor: "pointer" }}>
         <span style={{ fontSize: 18 }}>{busy ? "⏳" : "📷"}</span>
@@ -566,9 +569,9 @@ function App() {
  
   const allItems = INVENTAIRE.flatMap((sec) => sec.items.map((it) => ({ secId: sec.id, itId: it.id })));
   const totalInv = allItems.length;
-  const doneInv = allItems.filter((a) => inv[a.secId]?.[a.itId]?.status === "ok").length;
+  const doneInv = allItems.filter((a) => inv[a.secId] && inv[a.secId][a.itId] && inv[a.secId][a.itId].status === "ok").length;
   const problemesInv = allItems
-    .filter((a) => inv[a.secId]?.[a.itId]?.status === "probleme")
+    .filter((a) => inv[a.secId] && inv[a.secId][a.itId] && inv[a.secId][a.itId].status === "probleme")
     .map((a) => {
       const sec = INVENTAIRE.find((s) => s.id === a.secId);
       const it = sec.items.find((i) => i.id === a.itId);
