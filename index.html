@@ -4,15 +4,15 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
 <title>Carnet de ménage — Rapport de contrôle</title>
-
+ 
 <!-- React -->
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
-
+ 
 <!-- jsPDF pour la génération PDF réelle côté navigateur -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-
+ 
 <style>
   * { box-sizing: border-box; }
   body { margin: 0; background: #F5F2EA; font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif; }
@@ -21,14 +21,14 @@
 </head>
 <body>
 <div id="root"></div>
-
+ 
 <script type="text/babel" data-presets="react">
 const { useState, useEffect, useRef } = React;
-
+ 
 /* ---------------------------------------------------------------
    DONNÉES — Inventaire
 --------------------------------------------------------------- */
-
+ 
 const INVENTAIRE = [
   {
     id: "plan-travail",
@@ -102,7 +102,7 @@ const INVENTAIRE = [
     ],
   },
 ];
-
+ 
 const TACHES_DEFAUT = [
   { id: "t1", label: "Sols aspirés et lavés (toutes les pièces)", done: false },
   { id: "t2", label: "Salle de bain nettoyée (douche, WC, lavabo)", done: false },
@@ -118,13 +118,13 @@ const TACHES_DEFAUT = [
   { id: "t12", label: "Nettoyer le micro-ondes", done: false },
   { id: "t13", label: "Passer un coup sur les pales du ventilateur", done: false },
 ];
-
+ 
 const STORAGE_KEY = "menage-webapp-v1";
-
+ 
 /* ---------------------------------------------------------------
    STOCKAGE LOCAL (localStorage — fonctionne car app hébergée, hors artifact)
 --------------------------------------------------------------- */
-
+ 
 function useLocalStorage(key, initial) {
   const [state, setState] = useState(() => {
     try {
@@ -141,7 +141,7 @@ function useLocalStorage(key, initial) {
   }, [key, state]);
   return [state, setState];
 }
-
+ 
 function defaultInventaireState() {
   const s = {};
   INVENTAIRE.forEach((sec) => {
@@ -152,12 +152,12 @@ function defaultInventaireState() {
   });
   return s;
 }
-
+ 
 function todayLabel() {
   const d = new Date();
   return d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 }
-
+ 
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -166,17 +166,91 @@ function fileToDataUrl(file) {
     r.readAsDataURL(file);
   });
 }
-
+ 
+// Lit le tag d'orientation EXIF d'un JPEG (1-8), retourne 1 (normal) si absent/non JPEG.
+function getExifOrientation(arrayBuffer) {
+  const view = new DataView(arrayBuffer);
+  if (view.getUint16(0, false) !== 0xffd8) return 1; // pas un JPEG
+  let offset = 2;
+  const length = view.byteLength;
+  while (offset < length) {
+    const marker = view.getUint16(offset, false);
+    offset += 2;
+    if (marker === 0xffe1) {
+      // segment APP1 (EXIF)
+      if (view.getUint32(offset + 2, false) !== 0x45786966) return 1; // "Exif"
+      const little = view.getUint16(offset + 8, false) === 0x4949;
+      const tiffOffset = offset + 8;
+      const firstIFD = view.getUint32(tiffOffset + 4, little);
+      const dirOffset = tiffOffset + firstIFD;
+      const entries = view.getUint16(dirOffset, little);
+      for (let i = 0; i < entries; i++) {
+        const entryOffset = dirOffset + 2 + i * 12;
+        if (view.getUint16(entryOffset, little) === 0x0112) {
+          return view.getUint16(entryOffset + 8, little);
+        }
+      }
+      return 1;
+    } else if ((marker & 0xff00) !== 0xff00) {
+      break;
+    } else {
+      offset += view.getUint16(offset, false);
+    }
+  }
+  return 1;
+}
+ 
+// Redresse une photo selon son orientation EXIF et renvoie un dataURL propre,
+// utilisable directement dans <img> comme dans jsPDF (qui ignore l'EXIF).
+function orientedImageDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = () => {
+      const arrayBuffer = reader.result;
+      const orientation = getExifOrientation(arrayBuffer);
+      const blob = new Blob([arrayBuffer], { type: file.type || "image/jpeg" });
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        const swap = orientation >= 5 && orientation <= 8;
+        const w = img.naturalWidth;
+        const h = img.naturalHeight;
+        const canvas = document.createElement("canvas");
+        canvas.width = swap ? h : w;
+        canvas.height = swap ? w : h;
+        const ctx = canvas.getContext("2d");
+        switch (orientation) {
+          case 2: ctx.transform(-1, 0, 0, 1, w, 0); break;
+          case 3: ctx.transform(-1, 0, 0, -1, w, h); break;
+          case 4: ctx.transform(1, 0, 0, -1, 0, h); break;
+          case 5: ctx.transform(0, 1, 1, 0, 0, 0); break;
+          case 6: ctx.transform(0, 1, -1, 0, h, 0); break;
+          case 7: ctx.transform(0, -1, -1, 0, h, w); break;
+          case 8: ctx.transform(0, -1, 1, 0, 0, w); break;
+          default: break;
+        }
+        ctx.drawImage(img, 0, 0);
+        URL.revokeObjectURL(url);
+        resolve(canvas.toDataURL("image/jpeg", 0.85));
+      };
+      img.src = url;
+    };
+    reader.readAsArrayBuffer(file);
+  });
+}
+ 
 /* ---------------------------------------------------------------
    GÉNÉRATION PDF RÉELLE (jsPDF)
 --------------------------------------------------------------- */
-
-function genererPDF({ inv, taches, photos, message, nomAgent, doneInv, totalInv, doneTaches, totalTaches, problemesInv }) {
+ 
+function genererPDF({ inv, taches, photos, message, nomAgent, lieu, doneInv, totalInv, doneTaches, totalTaches, problemesInv }) {
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const pageW = 210, marginX = 16;
   let y = 16;
-
+ 
   const DARK = [46, 51, 47];
   const GREEN = [91, 116, 97];
   const GREEN_TEXT = [46, 107, 74];
@@ -185,17 +259,22 @@ function genererPDF({ inv, taches, photos, message, nomAgent, doneInv, totalInv,
   const MUTED = [138, 133, 120];
   const BG_LIGHT = [243, 241, 234];
   const BORDER = [233, 229, 218];
-
+ 
   function checkPageBreak(needed) {
     if (y + needed > 285) {
       doc.addPage();
       y = 16;
     }
   }
-
+ 
   // --- EN-TÊTE ---
+  const hasLieu = lieu && lieu.trim();
+  const hasNom = nomAgent && nomAgent.trim();
+  const extraLines = (hasLieu ? 1 : 0) + (hasNom ? 1 : 0);
+  const headerHeight = 20 + extraLines * 4.5;
+ 
   doc.setFillColor(...DARK);
-  doc.roundedRect(marginX, y, pageW - marginX * 2, 26, 3, 3, "F");
+  doc.roundedRect(marginX, y, pageW - marginX * 2, headerHeight, 3, 3, "F");
   doc.setTextColor(168, 176, 163);
   doc.setFontSize(8);
   doc.setFont("helvetica", "bold");
@@ -207,12 +286,21 @@ function genererPDF({ inv, taches, photos, message, nomAgent, doneInv, totalInv,
   doc.setFont("helvetica", "normal");
   doc.setTextColor(168, 176, 163);
   doc.text(todayLabel(), marginX + 6, y + 19.5);
-  if (nomAgent && nomAgent.trim()) {
+  let headerLineY = y + 19.5;
+  if (hasLieu) {
+    headerLineY += 4.5;
     doc.setTextColor(220, 224, 216);
-    doc.text(`Réalisé par : ${nomAgent.trim()}`, marginX + 6, y + 23.5);
+    doc.setFont("helvetica", "bold");
+    doc.text(`Lieu : ${lieu.trim()}`, marginX + 6, headerLineY);
+    doc.setFont("helvetica", "normal");
   }
-  y += 32;
-
+  if (hasNom) {
+    headerLineY += 4.5;
+    doc.setTextColor(220, 224, 216);
+    doc.text(`Réalisé par : ${nomAgent.trim()}`, marginX + 6, headerLineY);
+  }
+  y += headerHeight + 6;
+ 
   // --- RÉSUMÉ ---
   const boxW = (pageW - marginX * 2 - 8) / 3;
   const summary = [
@@ -234,7 +322,7 @@ function genererPDF({ inv, taches, photos, message, nomAgent, doneInv, totalInv,
     doc.text(s[1], x + 4, y + 12);
   });
   y += 24;
-
+ 
   // --- INVENTAIRE ---
   doc.setTextColor(...DARK);
   doc.setFontSize(13);
@@ -245,7 +333,7 @@ function genererPDF({ inv, taches, photos, message, nomAgent, doneInv, totalInv,
   doc.setLineWidth(0.8);
   doc.line(marginX, y, pageW - marginX, y);
   y += 6;
-
+ 
   INVENTAIRE.forEach((section) => {
     checkPageBreak(20);
     doc.setFontSize(10);
@@ -253,7 +341,7 @@ function genererPDF({ inv, taches, photos, message, nomAgent, doneInv, totalInv,
     doc.setTextColor(...DARK);
     doc.text(section.titre, marginX, y);
     y += 5;
-
+ 
     // en-tête tableau
     doc.setFillColor(...BG_LIGHT);
     doc.rect(marginX, y - 3.5, pageW - marginX * 2, 5, "F");
@@ -263,23 +351,23 @@ function genererPDF({ inv, taches, photos, message, nomAgent, doneInv, totalInv,
     doc.text("Statut", marginX + 82, y);
     doc.text("Commentaire", marginX + 112, y);
     y += 4;
-
+ 
     section.items.forEach((item) => {
       checkPageBreak(8);
       const st = (inv[section.id] && inv[section.id][item.id]) || {};
       const statusLabel = st.status === "ok" ? "Conforme" : st.status === "probleme" ? "Problème" : "Non vérifié";
       const statusColor = st.status === "ok" ? GREEN_TEXT : st.status === "probleme" ? RED : MUTED;
-
+ 
       doc.setFontSize(8.3);
       doc.setFont("helvetica", "normal");
       doc.setTextColor(...DARK);
       const labelLines = doc.splitTextToSize(item.label, 78);
       doc.text(labelLines, marginX + 1.5, y);
-
+ 
       doc.setFont("helvetica", "bold");
       doc.setTextColor(...statusColor);
       doc.text(statusLabel, marginX + 82, y);
-
+ 
       if (st.comment) {
         doc.setFont("helvetica", "italic");
         doc.setFontSize(7.8);
@@ -297,7 +385,7 @@ function genererPDF({ inv, taches, photos, message, nomAgent, doneInv, totalInv,
     });
     y += 4;
   });
-
+ 
   // --- TÂCHES ---
   checkPageBreak(20);
   y += 4;
@@ -309,7 +397,7 @@ function genererPDF({ inv, taches, photos, message, nomAgent, doneInv, totalInv,
   doc.setDrawColor(...GREEN);
   doc.line(marginX, y, pageW - marginX, y);
   y += 7;
-
+ 
   taches.forEach((t) => {
     checkPageBreak(6);
     doc.setFontSize(9);
@@ -329,7 +417,7 @@ function genererPDF({ inv, taches, photos, message, nomAgent, doneInv, totalInv,
     }
     y += 5.5;
   });
-
+ 
   // --- MESSAGE ---
   checkPageBreak(20);
   y += 4;
@@ -341,7 +429,7 @@ function genererPDF({ inv, taches, photos, message, nomAgent, doneInv, totalInv,
   doc.setDrawColor(...GREEN);
   doc.line(marginX, y, pageW - marginX, y);
   y += 7;
-
+ 
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
   doc.setTextColor(...DARK);
@@ -357,7 +445,7 @@ function genererPDF({ inv, taches, photos, message, nomAgent, doneInv, totalInv,
     doc.text("Aucun message.", marginX, y);
     y += 8;
   }
-
+ 
   // --- PHOTOS ---
   checkPageBreak(20);
   y += 4;
@@ -369,7 +457,7 @@ function genererPDF({ inv, taches, photos, message, nomAgent, doneInv, totalInv,
   doc.setDrawColor(...GREEN);
   doc.line(marginX, y, pageW - marginX, y);
   y += 8;
-
+ 
   if (photos.length > 0) {
     const imgSize = 42, gap = 4;
     let x = marginX;
@@ -396,7 +484,7 @@ function genererPDF({ inv, taches, photos, message, nomAgent, doneInv, totalInv,
     doc.text("Aucune photo ajoutée.", marginX, y);
     y += 8;
   }
-
+ 
   // --- PIED DE PAGE sur toutes les pages ---
   const pageCount = doc.internal.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
@@ -408,14 +496,14 @@ function genererPDF({ inv, taches, photos, message, nomAgent, doneInv, totalInv,
       pageW / 2, 292, { align: "center" }
     );
   }
-
+ 
   return doc;
 }
-
+ 
 /* ---------------------------------------------------------------
    COMPOSANTS UI
 --------------------------------------------------------------- */
-
+ 
 function ProgressRing({ done, total }) {
   const pct = total === 0 ? 0 : Math.round((done / total) * 100);
   const r = 26, c = 2 * Math.PI * r, offset = c - (pct / 100) * c;
@@ -433,7 +521,7 @@ function ProgressRing({ done, total }) {
     </div>
   );
 }
-
+ 
 function ItemRow({ item, status, onSetStatus, comment, onSetComment }) {
   return (
     <div style={{ borderBottom: "1px solid #E9E5DA" }}>
@@ -463,13 +551,13 @@ function ItemRow({ item, status, onSetStatus, comment, onSetComment }) {
     </div>
   );
 }
-
+ 
 function Section({ section, sectionState, onSetStatus, onSetComment, defaultOpen }) {
   const [open, setOpen] = useState(defaultOpen);
   const items = section.items;
   const done = items.filter((it) => sectionState[it.id] && sectionState[it.id].status === "ok").length;
   const problems = items.filter((it) => sectionState[it.id] && sectionState[it.id].status === "probleme").length;
-
+ 
   return (
     <div style={{ borderRadius: 16, overflow: "hidden", marginBottom: 12, background: "#fff", border: "1px solid #E9E5DA" }}>
       <button onClick={() => setOpen((o) => !o)}
@@ -497,25 +585,33 @@ function Section({ section, sectionState, onSetStatus, onSetComment, defaultOpen
     </div>
   );
 }
-
+ 
 function PhotoGrid({ photos, onAdd, onRemove }) {
   const inputRef = useRef(null);
   const [busy, setBusy] = useState(false);
-
+ 
   const handleFiles = async (e) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
     setBusy(true);
     for (const f of files) {
       try {
-        const dataUrl = await fileToDataUrl(f);
+        const dataUrl = await orientedImageDataUrl(f);
         onAdd(dataUrl);
-      } catch (err) { console.error(err); }
+      } catch (err) {
+        console.error("Orientation correction failed, fallback to raw file:", err);
+        try {
+          const dataUrl = await fileToDataUrl(f);
+          onAdd(dataUrl);
+        } catch (err2) {
+          console.error(err2);
+        }
+      }
     }
     setBusy(false);
     e.target.value = "";
   };
-
+ 
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
       {photos.map((p, i) => (
@@ -536,7 +632,7 @@ function PhotoGrid({ photos, onAdd, onRemove }) {
     </div>
   );
 }
-
+ 
 function TacheRow({ tache, onSetDone, onRemove }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0" }}>
@@ -550,21 +646,22 @@ function TacheRow({ tache, onSetDone, onRemove }) {
     </div>
   );
 }
-
+ 
 /* ---------------------------------------------------------------
    APP PRINCIPALE
 --------------------------------------------------------------- */
-
+ 
 function App() {
   const [inv, setInv] = useLocalStorage(STORAGE_KEY + "-inventaire", defaultInventaireState());
   const [taches, setTaches] = useLocalStorage(STORAGE_KEY + "-taches", TACHES_DEFAUT);
   const [photos, setPhotos] = useLocalStorage(STORAGE_KEY + "-photos", []);
   const [message, setMessage] = useLocalStorage(STORAGE_KEY + "-message", "");
   const [nomAgent, setNomAgent] = useLocalStorage(STORAGE_KEY + "-nom", "");
+  const [lieu, setLieu] = useLocalStorage(STORAGE_KEY + "-lieu", "");
   const [newTache, setNewTache] = useState("");
   const [tab, setTab] = useState("inventaire");
   const [generating, setGenerating] = useState(false);
-
+ 
   const allItems = INVENTAIRE.flatMap((sec) => sec.items.map((it) => ({ secId: sec.id, itId: it.id })));
   const totalInv = allItems.length;
   const doneInv = allItems.filter((a) => inv[a.secId] && inv[a.secId][a.itId] && inv[a.secId][a.itId].status === "ok").length;
@@ -577,7 +674,7 @@ function App() {
     });
   const totalTaches = taches.length;
   const doneTaches = taches.filter((t) => t.done).length;
-
+ 
   const setStatus = (secId, itId, status) => {
     setInv({ ...inv, [secId]: { ...inv[secId], [itId]: { ...inv[secId][itId], status } } });
   };
@@ -593,12 +690,20 @@ function App() {
   const removeTache = (id) => setTaches(taches.filter((t) => t.id !== id));
   const addPhoto = (dataUrl) => setPhotos([...photos, dataUrl]);
   const removePhoto = (i) => setPhotos(photos.filter((_, idx) => idx !== i));
-
+ 
   const handleGeneratePDF = async () => {
     setGenerating(true);
     try {
-      const doc = genererPDF({ inv, taches, photos, message, nomAgent, doneInv, totalInv, doneTaches, totalTaches, problemesInv });
-      const fileName = `rapport-menage-${new Date().toISOString().slice(0, 10)}.pdf`;
+      const doc = genererPDF({ inv, taches, photos, message, nomAgent, lieu, doneInv, totalInv, doneTaches, totalTaches, problemesInv });
+      const dateSlug = new Date().toISOString().slice(0, 10);
+      const lieuSlug = lieu && lieu.trim()
+        ? "-" + lieu.trim().toLowerCase()
+            .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // retire les accents
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/(^-|-$)/g, "")
+            .slice(0, 40)
+        : "";
+      const fileName = `rapport-menage-${dateSlug}${lieuSlug}.pdf`;
       doc.save(fileName);
     } catch (e) {
       alert("Erreur lors de la génération du PDF : " + e.message);
@@ -606,7 +711,7 @@ function App() {
     }
     setGenerating(false);
   };
-
+ 
   const resetAll = () => {
     if (!window.confirm("Réinitialiser tout le formulaire pour un nouveau ménage ?")) return;
     setInv(defaultInventaireState());
@@ -614,7 +719,7 @@ function App() {
     setPhotos([]);
     setMessage("");
   };
-
+ 
   return (
     <div style={{ minHeight: "100vh", paddingBottom: 140, background: "#F5F2EA" }}>
       <div style={{ background: "#2E332F", padding: "24px 20px 20px", borderRadius: "0 0 28px 28px" }}>
@@ -628,7 +733,7 @@ function App() {
         </div>
         <div style={{ fontSize: 12.5, marginTop: 12, textTransform: "capitalize", color: "#A8B0A3" }}>{todayLabel()}</div>
       </div>
-
+ 
       <div style={{ display: "flex", gap: 8, padding: "0 20px", marginTop: 16 }}>
         {[
           { id: "inventaire", label: "Inventaire" },
@@ -644,7 +749,7 @@ function App() {
           </button>
         ))}
       </div>
-
+ 
       <div style={{ padding: "0 20px", marginTop: 16 }}>
         {tab === "inventaire" && (
           <React.Fragment>
@@ -657,7 +762,7 @@ function App() {
             ))}
           </React.Fragment>
         )}
-
+ 
         {tab === "taches" && (
           <div style={{ borderRadius: 16, padding: 16, background: "#fff", border: "1px solid #E9E5DA" }}>
             <div style={{ fontSize: 12.5, marginBottom: 8, color: "#8A8578" }}>{doneTaches}/{totalTaches} tâches terminées</div>
@@ -676,7 +781,7 @@ function App() {
             </div>
           </div>
         )}
-
+ 
         {tab === "photos" && (
           <div style={{ borderRadius: 16, padding: 16, background: "#fff", border: "1px solid #E9E5DA" }}>
             <p style={{ fontSize: 12.5, marginBottom: 12, lineHeight: 1.5, color: "#8A8578" }}>
@@ -685,9 +790,12 @@ function App() {
             <PhotoGrid photos={photos} onAdd={addPhoto} onRemove={removePhoto} />
           </div>
         )}
-
+ 
         {tab === "message" && (
           <div style={{ borderRadius: 16, padding: 16, background: "#fff", border: "1px solid #E9E5DA" }}>
+            <label style={{ fontSize: 12.5, fontWeight: 500, marginBottom: 8, display: "block", color: "#2E332F" }}>Lieu / Adresse du logement</label>
+            <input value={lieu} onChange={(e) => setLieu(e.target.value)} placeholder="Ex : Appartement Empéri, 12 rue..."
+              style={{ width: "100%", fontSize: 13.5, borderRadius: 8, padding: "8px 12px", outline: "none", marginBottom: 16, background: "#FAF8F3", border: "1px solid #E9E5DA", color: "#2E332F" }} />
             <label style={{ fontSize: 12.5, fontWeight: 500, marginBottom: 8, display: "block", color: "#2E332F" }}>Votre nom</label>
             <input value={nomAgent} onChange={(e) => setNomAgent(e.target.value)} placeholder="Prénom Nom"
               style={{ width: "100%", fontSize: 13.5, borderRadius: 8, padding: "8px 12px", outline: "none", marginBottom: 16, background: "#FAF8F3", border: "1px solid #E9E5DA", color: "#2E332F" }} />
@@ -697,19 +805,19 @@ function App() {
               style={{ width: "100%", fontSize: 13.5, borderRadius: 8, padding: "10px 12px", outline: "none", resize: "none", background: "#FAF8F3", border: "1px solid #E9E5DA", color: "#2E332F", fontFamily: "inherit" }} />
           </div>
         )}
-
+ 
         {problemesInv.length > 0 && tab !== "inventaire" && (
           <div style={{ marginTop: 12, borderRadius: 12, padding: "12px 14px", display: "flex", gap: 8, background: "#FBEEEA", border: "1px solid #EBC9BB" }}>
             <span style={{ color: "#B4553F" }}>⚠</span>
             <span style={{ fontSize: 12.5, color: "#8A4433" }}>{problemesInv.length} problème(s) signalé(s) — inclus dans le PDF.</span>
           </div>
         )}
-
+ 
         <button onClick={resetAll} style={{ width: "100%", textAlign: "center", fontSize: 12, marginTop: 20, padding: 8, background: "none", border: "none", color: "#B0A896", cursor: "pointer" }}>
           Réinitialiser pour un nouveau ménage
         </button>
       </div>
-
+ 
       <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, padding: "12px 20px 20px", background: "linear-gradient(to top, #F5F2EA 70%, rgba(245,242,234,0))" }}>
         <button onClick={handleGeneratePDF} disabled={generating}
           style={{ width: "100%", padding: "14px 0", borderRadius: 16, fontWeight: 600, fontSize: 14, border: "none", cursor: "pointer",
@@ -720,7 +828,7 @@ function App() {
     </div>
   );
 }
-
+ 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
 </script>
 </body>
